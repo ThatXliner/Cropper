@@ -7,7 +7,7 @@
   <img alt="Apple Silicon and Intel" src="https://img.shields.io/badge/architecture-universal-blue">
 </p>
 
-A small, native macOS app for quickly cropping a folder of JPEGs. Open a folder, adjust the crop, press **⌘S**, and move to the next photo. Built with SwiftUI, AppKit, and ImageIO. Runs entirely offline with no third-party dependencies.
+A small, native macOS app for quickly cropping a folder of JPEGs. Open a folder, adjust the crop, press **Enter** or **⌘S**, and move to the next photo. Built with SwiftUI, AppKit, and ImageIO. Runs entirely offline with no third-party dependencies.
 
 <p align="center"><strong><a href="https://github.com/ThatXliner/Cropper/releases/latest">Download Cropper for macOS →</a></strong></p>
 
@@ -28,7 +28,9 @@ shasum -a 256 -c SHA256SUMS.txt
 ## What it does
 
 - **Fast folder browsing:** natural filename ordering, arrow-key navigation, and adjacent-image caching.
-- **Interactive cropping:** drag corners to resize, drag inside to reposition, and see a dimmed area outside the crop.
+- **Interactive cropping:** drag anywhere on the image toward the center to resize, Shift-drag inside the crop to reposition, and see a dimmed area outside the crop.
+- **Crop review:** cropped-only, side-by-side, and top-and-bottom previews. Switch with **⌘P** or the Preview Crop button; optionally preview automatically after dragging in Preferences. Previews show the selected area before saving.
+- **Dimensions and megapixel reduction:** live original → cropped pixel dimensions, original and cropped megapixels, megapixels removed, and percentage reduction using the exact output dimensions.
 - **Aspect ratios:** Original, Freeform, 1:1, 3:2, 4:3, 5:4, 16:9, and custom width:height.
 - **Direct JPEG saving:** no export dialog, adjustable quality, and optional advance after saving.
 - **Safe defaults:** preserves originals and saves uniquely named results into a `Cropped` subfolder. A separate output folder is available in Preferences. Overwriting originals requires explicitly enabling that preference.
@@ -40,9 +42,11 @@ shasum -a 256 -c SHA256SUMS.txt
 
 1. Press **⌘O** and choose a folder of JPEGs. Folder scanning is nonrecursive.
 2. Pick an aspect ratio. For Custom, enter positive width and height values and press **Apply**.
-3. Drag a corner to resize the crop; drag inside to move it.
-4. Press **⌘S** to save. By default, the result is `Cropped/<name>-cropped.jpg`. Existing output files get a numbered suffix.
+3. Drag anywhere on the image toward the center to crop; the nearest corner follows your drag. Corner handles also work. Hold **Shift** and drag inside the crop to move it.
+4. Use **Preview Crop** to review the result, then press **Enter** or **⌘S** to save. By default, the result is `Cropped/<name>-cropped.jpg`. Existing output files get a numbered suffix.
 5. Press **→** for the next photo, or enable automatic advancement in Preferences (**⌘,**).
+
+The + and − shortcuts preserve the crop center and aspect ratio and stop at the image boundaries or minimum crop size. The step is configurable from 1–25 percentage points in Preferences. For example, + changes 50% retained image area to 55% at the default step.
 
 Navigation discards unsaved crop edits. Undo is available before saving; saved overwrites cannot be undone in Cropper.
 
@@ -52,7 +56,10 @@ Navigation discards unsaved crop edits. Undo is available before saving; saved o
 | --- | --- |
 | **← / →** | Previous / next photo |
 | **⌘O** | Open folder |
-| **⌘S** | Save crop |
+| **Enter / ⌘S** | Save crop (Enter confirms a focused text field while editing it) |
+| **⌘P** | Toggle crop preview / editing |
+| **Escape** | Return to editing when the canvas has focus |
+| **+ / −** | Increase / decrease retained area by the configured percentage-point step (default 5) |
 | **⌘Z** | Undo crop edit |
 | **⌘R** | Reset to the largest rectangle for the selected ratio |
 | **⌘1** | Original ratio |

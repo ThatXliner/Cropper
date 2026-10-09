@@ -32,6 +32,14 @@ import AppKit
                         .disabled(model.saving)
                 }
                 Divider()
+                Button("Save Crop", action: model.save).keyboardShortcut(.return, modifiers: [])
+                    .disabled(model.preview == nil || model.loading || model.saving)
+                Button("Preview / Edit Crop") { model.reviewing.toggle() }.keyboardShortcut("p")
+                    .disabled(model.preview == nil || model.saving)
+                Button("Increase Retained Area") { model.adjustCrop(1) }.keyboardShortcut("+", modifiers: [])
+                    .disabled(model.preview == nil || model.saving)
+                Button("Decrease Retained Area") { model.adjustCrop(-1) }.keyboardShortcut("-", modifiers: [])
+                    .disabled(model.preview == nil || model.saving)
                 Button("Previous Photo") { model.navigate(-1) }.keyboardShortcut(.leftArrow, modifiers: [])
                 Button("Next Photo") { model.navigate(1) }.keyboardShortcut(.rightArrow, modifiers: [])
             }
@@ -65,6 +73,22 @@ struct ContentView: View {
                 Button(action: model.save) { Label(model.saving ? "Saving…" : "Save Crop", systemImage: "square.and.arrow.down") }
                     .buttonStyle(.borderedProminent).disabled(model.preview == nil || model.loading || model.saving)
             }.padding(12)
+            HStack {
+                Button(model.reviewing ? "Edit Crop" : "Preview Crop") { model.reviewing.toggle() }
+                    .keyboardShortcut("p")
+                    .disabled(model.preview == nil || model.saving)
+                if model.reviewing {
+                    Picker("Preview", selection: $model.previewMode) {
+                        ForEach(CropPreviewMode.allCases) { Text($0.rawValue).tag($0) }
+                    }.frame(width: 230)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    if let megapixels = model.croppedMegapixels { Text(megapixels).font(.headline) }
+                    if let dimensions = model.cropDimensions { Text(dimensions).font(.caption) }
+                    if let summary = model.cropSummary { Text(summary).font(.caption).foregroundStyle(.secondary) }
+                }.monospacedDigit()
+            }.padding(.horizontal, 12).padding(.bottom, 10)
             ZStack {
                 CropCanvas(model: model)
                 if model.files.isEmpty {
@@ -73,7 +97,7 @@ struct ContentView: View {
                         Text("Cropper").font(.largeTitle)
                         Text(model.status).foregroundStyle(.secondary)
                         Button("Open JPEG Folder…", action: model.openFolder).buttonStyle(.borderedProminent)
-                        Text("← / → Navigate     ⌘S Save     ⌘1–8 Ratio     ⌘Z Undo").font(.callout).foregroundStyle(.secondary)
+                        Text("← / → Navigate     Enter / ⌘S Save     ⌘1–8 Ratio     ⌘Z Undo").font(.callout).foregroundStyle(.secondary)
                     }.foregroundStyle(.white)
                 }
                 if model.loading || model.saving {
@@ -111,11 +135,17 @@ struct Preferences: View {
                 Button("Default") { model.outputFolder = nil }
             }.disabled(model.overwrite)
             Text(model.outputFolder?.path ?? "Cropped subfolder beside the originals").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Picker("Crop preview layout", selection: $model.previewMode) {
+                ForEach(CropPreviewMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Toggle("Preview automatically after dragging", isOn: $model.automaticPreview)
+            Stepper("Crop shortcut step: \(Int(model.cropStep)) percentage points", value: $model.cropStep, in: 1...25, step: 1)
+            Text("+ increases retained image area; − decreases it. The center and aspect ratio stay fixed. Enter saves the crop; in a text field it confirms your input. ⌘P switches between preview and editing; Escape returns to editing.").font(.caption).foregroundStyle(.secondary)
             Toggle("Advance to next photo after saving", isOn: $model.advance)
             HStack { Text("JPEG quality"); Slider(value: $model.quality, in: 0.5...1); Text("\(Int(model.quality * 100))%").monospacedDigit().frame(width: 40) }
             Toggle("Try lossless JPEG cropping", isOn: $model.lossless)
             Text("Uses an installed jpegtran for exact 16-pixel-aligned crops of unrotated images. Otherwise saves using the JPEG quality above. No additional software is required.").font(.caption).foregroundStyle(.secondary)
-            Text("Drag corners to resize; drag inside to reposition. ⌘R resets. Ratio shortcuts: ⌘1 Original, ⌘2 Freeform, ⌘3 Square, ⌘4 3:2, ⌘5 4:3, ⌘6 5:4, ⌘7 16:9, ⌘8 Custom.").font(.caption).foregroundStyle(.secondary)
+            Text("Drag anywhere on the photo toward the center to crop. Hold Shift and drag inside the crop to reposition. ⌘R resets. Ratio shortcuts: ⌘1 Original, ⌘2 Freeform, ⌘3 Square, ⌘4 3:2, ⌘5 4:3, ⌘6 5:4, ⌘7 16:9, ⌘8 Custom.").font(.caption).foregroundStyle(.secondary)
         }.formStyle(.grouped).disabled(model.saving)
     }
 }

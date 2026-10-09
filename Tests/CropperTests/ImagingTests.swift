@@ -101,4 +101,160 @@ final class ImagingTests: XCTestCase {
         XCTAssertEqual(model.crop.width / model.crop.height * model.info!.ratio, 1, accuracy: 0.001)
         model.undo(); XCTAssertEqual(model.crop.width, 1)
     }
+    @MainActor func testAreaShortcutsAndRoundedMegapixels() throws {
+        let model = CropModel()
+        model.info = PhotoInfo(width: 6000, height: 4000, orientation: 1)
+        model.preview = try Imaging.preview(fixture())
+        let savedStep = UserDefaults.standard.object(forKey: "cropStep")
+        defer {
+            if let savedStep { UserDefaults.standard.set(savedStep, forKey: "cropStep") }
+            else { UserDefaults.standard.removeObject(forKey: "cropStep") }
+        }
+        model.cropStep = 5
+        model.crop = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        XCTAssertEqual(model.cropDimensions, "6000 × 4000 → 3000 × 2000 px")
+        XCTAssertEqual(model.croppedMegapixels, "Cropped: 6.00 MP")
+        model.reviewing = true
+        XCTAssertEqual(model.croppedMegapixels, "Cropped: 6.00 MP")
+        model.reviewing = false
+        XCTAssertEqual(model.cropSummary, "24.00 → 6.00 MP · −18.00 MP (75.0% reduction)")
+        let canvas = CanvasView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        canvas.model = model
+        func key(_ text: String, code: UInt16) {
+            canvas.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!)
+        }
+        key("+", code: 24)
+        XCTAssertEqual(model.crop.width * model.crop.height, 0.30, accuracy: 0.000001)
+        XCTAssertEqual(model.cropDimensions, "6000 × 4000 → 3286 × 2190 px")
+        XCTAssertEqual(model.crop.midX, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(model.crop.width / model.crop.height, 1, accuracy: 0.000001)
+        key("-", code: 27)
+        XCTAssertEqual(model.crop.width * model.crop.height, 0.25, accuracy: 0.000001)
+        model.undo()
+        XCTAssertEqual(model.crop.width * model.crop.height, 0.30, accuracy: 0.000001)
+        model.crop = CGRect(x: 0, y: 0.25, width: 0.5, height: 0.5)
+        model.adjustCrop(1)
+        XCTAssertEqual(model.crop.minX, 0, accuracy: 0.000001)
+        XCTAssertEqual(model.crop.width, 0.5, accuracy: 0.000001)
+        for _ in 0..<100 { model.adjustCrop(-1) }
+        XCTAssertGreaterThanOrEqual(model.crop.width, 0.01 - 0.000001)
+        model.reviewing = true
+        key("\u{1b}", code: 53)
+        XCTAssertFalse(model.reviewing)
+    }
+
+    @MainActor func testPreviewLayoutsAndEnterSave() async throws {
+        let url = try fixture()
+        let model = CropModel()
+        let defaults = UserDefaults.standard
+        let keys = ["overwrite", "advance", "outputFolder", "lossless", "automaticPreview"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        model.files = [url]
+        model.info = try Imaging.info(url)
+        model.preview = try Imaging.preview(url)
+        model.crop = CGRect(x: 0, y: 0, width: 1, height: 0.4)
+        model.overwrite = false; model.advance = false; model.lossless = false
+        model.outputFolder = folder.appendingPathComponent("output")
+        model.reviewing = true
+        let canvas = CanvasView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        canvas.model = model
+        model.reviewing = false
+        model.automaticPreview = true
+        let location = canvas.convert(CGPoint(x: 400, y: 150), to: nil)
+        func mouse(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                               windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        canvas.mouseDown(with: mouse(.leftMouseDown))
+        canvas.mouseDragged(with: mouse(.leftMouseDragged))
+        canvas.mouseUp(with: mouse(.leftMouseUp))
+        XCTAssertTrue(model.reviewing)
+        let previewPreference = defaults.object(forKey: "previewMode")
+        defer {
+            if let previewPreference { defaults.set(previewPreference, forKey: "previewMode") }
+            else { defaults.removeObject(forKey: "previewMode") }
+        }
+        for mode in CropPreviewMode.allCases {
+            model.previewMode = mode
+            let bitmap = canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds)!
+            canvas.cacheDisplay(in: canvas.bounds, to: bitmap)
+            // Every layout renders the selected blue top region in the result panel.
+            let point: CGPoint
+            switch mode {
+            case .cropped: point = CGPoint(x: 400, y: 300)
+            case .sideBySide: point = CGPoint(x: 592, y: 300)
+            case .stacked: point = CGPoint(x: 400, y: 455)
+            }
+            let color = bitmap.colorAt(x: Int(point.x) * bitmap.pixelsWide / 800,
+                                       y: Int(point.y) * bitmap.pixelsHigh / 600)!.usingColorSpace(.deviceRGB)!
+            XCTAssertGreaterThan(color.blueComponent, color.redComponent + 0.5, "Layout \(mode)")
+        }
+        canvas.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!)
+        for _ in 0..<200 where model.saving { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(model.saving)
+        XCTAssertNil(model.error)
+        let output = model.outputFolder!.appendingPathComponent("source-cropped.jpg")
+        let result = try Imaging.info(output)
+        XCTAssertEqual(result.width, 160)
+        XCTAssertEqual(result.height, 38)
+        XCTAssertTrue(model.reviewing)
+        let savedMP = String(format: "Cropped: %.2f MP", Double(result.width * result.height) / 1e6)
+        XCTAssertEqual(model.croppedMegapixels, savedMP)
+        XCTAssertTrue(model.status.contains(savedMP))
+    }
+
+    @MainActor func testDragAnywhereResizesAndShiftDragRepositions() throws {
+        let model = CropModel()
+        model.info = PhotoInfo(width: 160, height: 96, orientation: 1)
+        model.preview = try Imaging.preview(fixture())
+        let savedAutomatic = UserDefaults.standard.object(forKey: "automaticPreview")
+        defer {
+            if let savedAutomatic { UserDefaults.standard.set(savedAutomatic, forKey: "automaticPreview") }
+            else { UserDefaults.standard.removeObject(forKey: "automaticPreview") }
+        }
+        model.automaticPreview = false
+        let canvas = CanvasView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        canvas.model = model
+        // Photo occupies x=28...772, y=76.8...523.2 in this canvas.
+        func mouse(_ type: NSEvent.EventType, _ point: CGPoint, shift: Bool = false) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: canvas.convert(point, to: nil), modifierFlags: shift ? [.shift] : [], timestamp: 0,
+                               windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        func drag(_ start: CGPoint, _ end: CGPoint, shift: Bool = false) {
+            canvas.mouseDown(with: mouse(.leftMouseDown, start, shift: shift))
+            canvas.mouseDragged(with: mouse(.leftMouseDragged, end, shift: shift))
+            canvas.mouseUp(with: mouse(.leftMouseUp, end, shift: shift))
+        }
+        for point in [CGPoint(x: 200, y: 180), CGPoint(x: 600, y: 180), CGPoint(x: 200, y: 420), CGPoint(x: 600, y: 420)] {
+            let original = CGRect(x: 0, y: 0, width: 1, height: 1)
+            model.crop = original
+            drag(point, CGPoint(x: 400, y: 300))
+            XCTAssertLessThan(model.crop.width, 1)
+            XCTAssertLessThan(model.crop.height, 1)
+            XCTAssertEqual(model.crop.width / model.crop.height, 1, accuracy: 0.000001)
+            XCTAssertGreaterThanOrEqual(model.crop.minX, 0)
+            XCTAssertGreaterThanOrEqual(model.crop.minY, 0)
+            XCTAssertLessThanOrEqual(model.crop.maxX, 1)
+            XCTAssertLessThanOrEqual(model.crop.maxY, 1)
+            model.undo()
+            XCTAssertEqual(model.crop, original)
+        }
+        model.crop = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        drag(CGPoint(x: 400, y: 300), CGPoint(x: 450, y: 320), shift: true)
+        XCTAssertEqual(model.crop.width, 0.5)
+        XCTAssertEqual(model.crop.height, 0.5)
+        XCTAssertGreaterThan(model.crop.minX, 0.25)
+        let before = model.crop
+        drag(CGPoint(x: 10, y: 10), CGPoint(x: 400, y: 300))
+        XCTAssertEqual(model.crop, before)
+        // Even the dimmed part of the image can initiate resizing.
+        drag(CGPoint(x: 100, y: 150), CGPoint(x: 180, y: 200))
+        XCTAssertLessThan(model.crop.width, before.width)
+    }
+
 }

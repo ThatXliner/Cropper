@@ -18,6 +18,11 @@ enum Ratio: String, CaseIterable, Identifiable {
     }
 }
 
+enum CropPreviewMode: String, CaseIterable, Identifiable {
+    case cropped = "Cropped only", sideBySide = "Side by side", stacked = "Top and bottom"
+    var id: String { rawValue }
+}
+
 // NSCache is thread-safe; the lock protects cancellation across the UI and decode queue.
 final class PreviewCache: @unchecked Sendable {
     let images = NSCache<NSURL, CGImage>()
@@ -40,6 +45,33 @@ final class PreviewCache: @unchecked Sendable {
     @Published var ratio: Ratio = .original
     @Published var customWidth = 3.0
     @Published var customHeight = 2.0
+    @Published var reviewing = false
+    @Published var previewMode = CropPreviewMode(rawValue: UserDefaults.standard.string(forKey: "previewMode") ?? "") ?? .sideBySide {
+        didSet { UserDefaults.standard.set(previewMode.rawValue, forKey: "previewMode") }
+    }
+    @Published var automaticPreview = UserDefaults.standard.bool(forKey: "automaticPreview") {
+        didSet { UserDefaults.standard.set(automaticPreview, forKey: "automaticPreview") }
+    }
+    @Published var cropStep = UserDefaults.standard.object(forKey: "cropStep") as? Double ?? 5 {
+        didSet { UserDefaults.standard.set(cropStep, forKey: "cropStep") }
+    }
+    var croppedMegapixels: String? {
+        guard let info else { return nil }
+        let pixels = Imaging.pixels(crop, info: info)
+        return String(format: "Cropped: %.2f MP", Double(pixels.width * pixels.height) / 1e6)
+    }
+    var cropDimensions: String? {
+        guard let info else { return nil }
+        let pixels = Imaging.pixels(crop, info: info)
+        return "\(info.width) × \(info.height) → \(Int(pixels.width)) × \(Int(pixels.height)) px"
+    }
+    var cropSummary: String? {
+        guard let info else { return nil }
+        let pixels = Imaging.pixels(crop, info: info)
+        let original = Double(info.width) * Double(info.height)
+        let retained = Double(pixels.width * pixels.height)
+        return String(format: "%.2f → %.2f MP · −%.2f MP (%.1f%% reduction)", original / 1e6, retained / 1e6, (original - retained) / 1e6, (1 - retained / original) * 100)
+    }
     @Published var loading = false
     @Published var saving = false
     @Published var error: String?
@@ -99,7 +131,7 @@ final class PreviewCache: @unchecked Sendable {
     func load() {
         guard let url = current else { return }
         let token = UUID(); generation = token; cache.request(token)
-        loading = true; preview = nil; info = nil; history.removeAll(); crop = CGRect(x: 0, y: 0, width: 1, height: 1)
+        reviewing = false; loading = true; preview = nil; info = nil; history.removeAll(); crop = CGRect(x: 0, y: 0, width: 1, height: 1)
         let neighbors = [index - 1, index + 1].filter { files.indices.contains($0) }.map { files[$0] }
         let cache = cache
         queue.async { [weak self] in
@@ -127,15 +159,30 @@ final class PreviewCache: @unchecked Sendable {
         }
     }
     func remember() { history.append(crop); if history.count > 50 { history.removeFirst() } }
-    func undo() { if let prior = history.popLast() { crop = prior } }
-    func reset() { remember(); crop = CGRect(x: 0, y: 0, width: 1, height: 1); fitRatio(record: false) }
-    func setRatio(_ value: Ratio) { ratio = value; fitRatio() }
+    func undo() { if let prior = history.popLast() { reviewing = false; crop = prior } }
+    func reset() { reviewing = false; remember(); crop = CGRect(x: 0, y: 0, width: 1, height: 1); fitRatio(record: false) }
+    func setRatio(_ value: Ratio) { reviewing = false; ratio = value; fitRatio() }
     func fitRatio(record: Bool = true) {
         guard let info, let aspect else { return }
         if record { remember() }
         let normalized = aspect / info.ratio
         var w = crop.width; var h = crop.height
         if w / h > normalized { w = h * normalized } else { h = w / normalized }
+        crop = CGRect(x: crop.midX - w / 2, y: crop.midY - h / 2, width: w, height: h)
+    }
+    // Adjust retained image area in percentage points, preserving center and ratio.
+    func adjustCrop(_ direction: Double) {
+        guard preview != nil, !loading, !saving else { return }
+        let area = crop.width * crop.height
+        let maxScale = min(2 * min(crop.midX, 1 - crop.midX) / crop.width,
+                           2 * min(crop.midY, 1 - crop.midY) / crop.height)
+        let minimumScale = max(0.01 / crop.width, 0.01 / crop.height)
+        let target = max(area * minimumScale * minimumScale,
+                         min(area * maxScale * maxScale, area + direction * CGFloat(max(1, min(25, cropStep))) / 100))
+        guard abs(target - area) > 0.0000001 else { return }
+        remember()
+        let scale = sqrt(target / area)
+        let w = crop.width * scale, h = crop.height * scale
         crop = CGRect(x: crop.midX - w / 2, y: crop.midY - h / 2, width: w, height: h)
     }
     func save() {
@@ -153,6 +200,7 @@ final class PreviewCache: @unchecked Sendable {
         } catch { self.error = error.localizedDescription; return }
         saving = true
         let rect = crop, quality = quality, lossless = lossless, advance = advance, cache = cache
+        let resultMegapixels = croppedMegapixels ?? ""
         queue.async { [weak self] in
             do {
                 let exact = try Imaging.save(source: url, destination: destination, crop: rect, quality: quality, lossless: lossless)
@@ -161,7 +209,7 @@ final class PreviewCache: @unchecked Sendable {
                     guard let self else { return }; self.saving = false; self.history.removeAll()
                     if advance && self.index < self.files.count - 1 { self.navigate(1) }
                     else if destination == url { self.load() }
-                    self.status = "Saved \(destination.lastPathComponent) · \(exact ? "lossless" : "JPEG")"
+                    self.status = "Saved \(destination.lastPathComponent) · \(resultMegapixels) · \(exact ? "lossless" : "JPEG")"
                 }
             } catch {
                 let message = error.localizedDescription
