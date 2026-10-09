@@ -50,6 +50,7 @@ import AppKit
 
 struct ContentView: View {
     @ObservedObject var model: CropModel
+    @State private var showingLosslessDetails = false
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -111,6 +112,21 @@ struct ContentView: View {
                 if !model.files.isEmpty { Text("\(model.index + 1) / \(model.files.count)").foregroundStyle(.secondary) }
                 Spacer()
                 Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if model.losslessWarning != nil {
+                    Button { showingLosslessDetails = true } label: {
+                        Label("Saved as JPEG · Why?", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                    }.buttonStyle(.plain)
+                        .help("The last crop could not be saved losslessly. Click for details and next steps.")
+                        .popover(isPresented: $showingLosslessDetails) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("Lossless crop unavailable").font(.headline)
+                                Text(model.losslessWarning ?? "").textSelection(.enabled)
+                                Link("jpegtran installation instructions", destination: URL(string: "https://formulae.brew.sh/formula/jpeg-turbo")!)
+                                HStack { Spacer(); Button("Done") { showingLosslessDetails = false } }
+                            }.padding(20).frame(width: 400)
+                        }
+                }
                 SettingsLink { Image(systemName: "gearshape") }
             }.padding(12)
         }
@@ -143,8 +159,8 @@ struct Preferences: View {
             Text("+ increases retained image area; − decreases it. The center and aspect ratio stay fixed. Enter saves the crop; in a text field it confirms your input. ⌘P switches between preview and editing; Escape returns to editing.").font(.caption).foregroundStyle(.secondary)
             Toggle("Advance to next photo after saving", isOn: $model.advance)
             HStack { Text("JPEG quality"); Slider(value: $model.quality, in: 0.5...1); Text("\(Int(model.quality * 100))%").monospacedDigit().frame(width: 40) }
-            Toggle("Try lossless JPEG cropping", isOn: $model.lossless)
-            Text("Uses an installed jpegtran for exact 16-pixel-aligned crops of unrotated images. Otherwise saves using the JPEG quality above. No additional software is required.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Try lossless JPEG cropping first", isOn: $model.lossless)
+            Text("Enabled by default. Uses an installed jpegtran for exact 16-pixel-aligned crops of unrotated images. Otherwise saves using the JPEG quality above. No additional software is required.").font(.caption).foregroundStyle(.secondary)
             Text("Drag anywhere on the photo toward the center to crop. Hold Shift and drag inside the crop to reposition. ⌘R resets. Ratio shortcuts: ⌘1 Original, ⌘2 Freeform, ⌘3 Square, ⌘4 3:2, ⌘5 4:3, ⌘6 5:4, ⌘7 16:9, ⌘8 Custom.").font(.caption).foregroundStyle(.secondary)
         }.formStyle(.grouped).disabled(model.saving)
     }

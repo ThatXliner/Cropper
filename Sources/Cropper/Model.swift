@@ -74,6 +74,7 @@ final class PreviewCache: @unchecked Sendable {
     }
     @Published var loading = false
     @Published var saving = false
+    @Published var losslessWarning: String?
     @Published var error: String?
     @Published var status = "Open a folder to begin"
     @Published var outputFolder: URL? {
@@ -88,7 +89,7 @@ final class PreviewCache: @unchecked Sendable {
     @Published var quality = UserDefaults.standard.object(forKey: "quality") as? Double ?? 0.95 {
         didSet { UserDefaults.standard.set(quality, forKey: "quality") }
     }
-    @Published var lossless = UserDefaults.standard.bool(forKey: "lossless") {
+    @Published var lossless = UserDefaults.standard.object(forKey: "lossless") as? Bool ?? true {
         didSet { UserDefaults.standard.set(lossless, forKey: "lossless") }
     }
     private let queue = DispatchQueue(label: "Cropper.images", qos: .userInitiated)
@@ -199,17 +200,21 @@ final class PreviewCache: @unchecked Sendable {
             }
         } catch { self.error = error.localizedDescription; return }
         saving = true
+        losslessWarning = nil
         let rect = crop, quality = quality, lossless = lossless, advance = advance, cache = cache
         let resultMegapixels = croppedMegapixels ?? ""
         queue.async { [weak self] in
             do {
-                let exact = try Imaging.save(source: url, destination: destination, crop: rect, quality: quality, lossless: lossless)
+                let result = try Imaging.save(source: url, destination: destination, crop: rect, quality: quality, lossless: lossless)
                 cache.removeObject(forKey: url as NSURL)
                 DispatchQueue.main.async {
                     guard let self else { return }; self.saving = false; self.history.removeAll()
+                    if let reason = result.fallbackReason {
+                        self.losslessWarning = "Saved \(destination.lastPathComponent) using JPEG quality \(Int(quality * 100))%. The crop was saved successfully, but re-encoded rather than losslessly cropped.\n\n\(reason.explanation)\n\nRetry from the original JPEG to avoid recompressing a previously saved crop."
+                    }
                     if advance && self.index < self.files.count - 1 { self.navigate(1) }
                     else if destination == url { self.load() }
-                    self.status = "Saved \(destination.lastPathComponent) · \(resultMegapixels) · \(exact ? "lossless" : "JPEG")"
+                    self.status = "Saved \(destination.lastPathComponent) · \(resultMegapixels) · \(result.usedLossless ? "lossless" : "JPEG")"
                 }
             } catch {
                 let message = error.localizedDescription

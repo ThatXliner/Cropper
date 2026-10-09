@@ -48,7 +48,7 @@ shasum -a 256 -c SHA256SUMS.txt
 - **Safe defaults:** preserves originals and saves uniquely named results into a `Cropped` subfolder. A separate output folder is available in Preferences. Overwriting originals requires explicitly enabling that preference.
 - **Native appearance:** follows macOS light/dark mode, with a dark photo canvas.
 - **Metadata and color:** carries standard EXIF/IPTC/GPS metadata and ICC color profiles through ImageIO, with correct visual orientation.
-- **Optional lossless crops:** uses an existing jpegtran when the exact crop is eligible; otherwise uses normal JPEG encoding.
+- **Lossless-first crops:** uses an existing jpegtran when the exact crop is eligible; otherwise uses normal JPEG encoding.
 
 ## Quick start
 
@@ -92,13 +92,13 @@ Standard EXIF, TIFF, GPS, and IPTC properties are passed through ImageIO; the IC
 
 Display previews are limited to 2400 pixels on their longest edge. A cache holds up to three previews with an 80 MB cost limit. The current image loads before neighboring images are prefetched on a background queue. Full-resolution decoding and encoding happen only while saving. An in-flight decode finishes before a newer request starts.
 
-Tests include a synthetic **6960 × 4640 JPEG** (32.3 MP). Actual Canon EOS R7 files are not included; camera-specific metadata and performance need verification with real files. This MVP focuses on JPEG cropping, without RAW support or advanced editing tools.
+Tests include a synthetic **6960 × 4640 JPEG** (32.3 MP). Camera-specific metadata and performance need verification with real camera files. This MVP focuses on JPEG cropping, without RAW support or advanced editing tools.
 
-### Optional lossless cropping
+### Lossless-first cropping
 
-Enable **Try lossless JPEG cropping** in Preferences. Cropper looks for jpegtran at `/opt/homebrew/bin/jpegtran`, `/usr/local/bin/jpegtran`, or `/usr/bin/jpegtran`; installing it is optional.
+**Try lossless JPEG cropping first** is enabled by default. You can turn it off in Preferences. Cropper looks for jpegtran at `/opt/homebrew/bin/jpegtran`, `/usr/local/bin/jpegtran`, or `/usr/bin/jpegtran`; installing it is optional.
 
-Lossless saving is attempted only for orientation-1 images when the crop origin and dimensions are divisible by 16. This conservatively accommodates JPEG MCU sizes. It uses `-copy all -perfect`, verifies the output dimensions, and never expands the crop. Missing tools, ineligible crops, or tool failures fall back to normal JPEG encoding. The status bar shows which mode was used. In lossless mode, copied metadata remains verbatim, including original EXIF dimension fields.
+Lossless saving is attempted only for orientation-1 images when the crop origin and dimensions are divisible by 16. This conservatively accommodates JPEG MCU sizes. It uses `-copy all -perfect`, verifies the output dimensions, and never expands the crop. Missing tools, ineligible crops, or tool failures fall back to normal JPEG encoding. The status bar shows which mode was used. If lossless cropping is unavailable, a yellow **Saved as JPEG · Why?** message opens an explanation and suggested next steps. The warning refers to the last saved crop, including when automatic advancement is enabled. In lossless mode, copied metadata remains verbatim, including original EXIF dimension fields.
 
 ## Build from source
 

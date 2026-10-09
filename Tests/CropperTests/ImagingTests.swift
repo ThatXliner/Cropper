@@ -26,7 +26,7 @@ final class ImagingTests: XCTestCase {
         let url = try fixture()
         let before = try Data(contentsOf: url)
         let output = folder.appendingPathComponent("result.jpg")
-        XCTAssertFalse(try Imaging.save(source: url, destination: output, crop: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5), quality: 0.9, lossless: false))
+        XCTAssertFalse(try Imaging.save(source: url, destination: output, crop: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5), quality: 0.9, lossless: false).usedLossless)
         let source = try Imaging.source(output)
         let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
         XCTAssertEqual(image.width, 80); XCTAssertEqual(image.height, 48)
@@ -206,6 +206,16 @@ final class ImagingTests: XCTestCase {
         let savedMP = String(format: "Cropped: %.2f MP", Double(result.width * result.height) / 1e6)
         XCTAssertEqual(model.croppedMegapixels, savedMP)
         XCTAssertTrue(model.status.contains(savedMP))
+        XCTAssertNil(model.losslessWarning)
+        model.lossless = true
+        model.advance = true
+        model.files = [url, url]
+        model.save()
+        for _ in 0..<200 where model.saving || model.loading { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.index, 1)
+        XCTAssertTrue(model.losslessWarning?.contains("source-cropped-2.jpg") == true)
+        XCTAssertTrue(model.losslessWarning?.contains("multiples of 16") == true)
     }
 
     @MainActor func testDragAnywhereResizesAndShiftDragRepositions() throws {
@@ -255,6 +265,59 @@ final class ImagingTests: XCTestCase {
         // Even the dimmed part of the image can initiate resizing.
         drag(CGPoint(x: 100, y: 150), CGPoint(x: 180, y: 200))
         XCTAssertLessThan(model.crop.width, before.width)
+    }
+
+    @MainActor func testLosslessDefaultsAndOptOut() {
+        let defaults = UserDefaults.standard
+        let old = defaults.object(forKey: "lossless")
+        defer {
+            if let old { defaults.set(old, forKey: "lossless") }
+            else { defaults.removeObject(forKey: "lossless") }
+        }
+        defaults.removeObject(forKey: "lossless")
+        XCTAssertTrue(CropModel().lossless)
+        defaults.set(false, forKey: "lossless")
+        XCTAssertFalse(CropModel().lossless)
+    }
+
+    func testLosslessFallbackReasonsStillSaveExactCrop() throws {
+        let url = try fixture()
+        let original = try Data(contentsOf: url)
+        let output = folder.appendingPathComponent("fallback.jpg")
+        let aligned = CGRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        let missing = try Imaging.save(source: url, destination: output, crop: aligned, quality: 0.95, lossless: true, jpegtranPaths: [])
+        XCTAssertFalse(missing.usedLossless)
+        XCTAssertEqual(missing.fallbackReason, .unavailable)
+        XCTAssertTrue(missing.fallbackReason!.explanation.contains("brew install jpeg-turbo"))
+        XCTAssertEqual(try Imaging.info(output).width, 80)
+        XCTAssertEqual(try Imaging.info(output).height, 48)
+        let unaligned = try Imaging.save(source: url, destination: output, crop: CGRect(x: 0.1, y: 0, width: 0.51, height: 0.5), quality: 0.95, lossless: true)
+        XCTAssertEqual(unaligned.fallbackReason, .alignment)
+        XCTAssertEqual(try Imaging.info(output).width, 82)
+        let failure = try Imaging.save(source: url, destination: output, crop: aligned, quality: 0.95, lossless: true, jpegtranPaths: ["/usr/bin/false"])
+        XCTAssertEqual(failure.fallbackReason, .toolFailed)
+        let invalid = try Imaging.save(source: url, destination: output, crop: aligned, quality: 0.95, lossless: true, jpegtranPaths: ["/usr/bin/true"])
+        XCTAssertEqual(invalid.fallbackReason, .unexpectedOutput)
+        let disabled = try Imaging.save(source: url, destination: output, crop: aligned, quality: 0.95, lossless: false, jpegtranPaths: [])
+        XCTAssertFalse(disabled.usedLossless)
+        XCTAssertNil(disabled.fallbackReason)
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        let rotated = try fixture(orientation: 6)
+        let orientation = try Imaging.save(source: rotated, destination: output, crop: aligned, quality: 0.95, lossless: true)
+        XCTAssertEqual(orientation.fallbackReason, .orientation)
+        XCTAssertEqual(try Imaging.info(output).orientation, 1)
+    }
+
+    func testRealLosslessCrop() throws {
+        let executable = ["/opt/homebrew/bin/jpegtran", "/usr/local/bin/jpegtran", "/usr/bin/jpegtran"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let executable else { throw XCTSkip("jpegtran is not installed") }
+        let url = try fixture()
+        let output = folder.appendingPathComponent("lossless.jpg")
+        let result = try Imaging.save(source: url, destination: output, crop: CGRect(x: 0, y: 0, width: 0.5, height: 0.5), quality: 0.5, lossless: true, jpegtranPaths: [executable])
+        XCTAssertTrue(result.usedLossless)
+        XCTAssertNil(result.fallbackReason)
+        XCTAssertEqual(try Imaging.info(output).width, 80)
+        XCTAssertEqual(try Imaging.info(output).height, 48)
     }
 
 }
