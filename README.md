@@ -15,11 +15,11 @@ A small, native macOS app for quickly cropping a folder of JPEGs. Open a folder,
 
 **Crop with live dimensions and megapixels**
 
-<p align="center"><img src="docs/screenshots/cropping.png" alt="Cropper editing a JPEG with a crop rectangle, live pixel dimensions, and a final cropped count of 2.87 megapixels" width="960"></p>
+<p align="center"><img src="docs/screenshots/cropping.jpg" alt="Cropper editing a JPEG with a crop rectangle, live pixel dimensions, and a final cropped count of 2.87 megapixels" width="960"></p>
 
 **Compare the original and cropped result before saving**
 
-<p align="center"><img src="docs/screenshots/side-by-side.png" alt="Cropper side-by-side preview showing the original image on the left and the cropped result on the right" width="960"></p>
+<p align="center"><img src="docs/screenshots/side-by-side.jpg" alt="Cropper side-by-side preview showing the original image on the left and the cropped result on the right" width="960"></p>
 
 Captured from Cropper 0.2.0 on macOS. Sample image: [Blue Marble](https://science.nasa.gov/resource/blue-marble-2002/), NASA's Earth Observatory.
 
